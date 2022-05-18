@@ -1,14 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity 0.8.11;
 
-/*
-
-@title Curve Fee Distribution modified for ve(3,3) emissions
-@author Curve Finance, andrecronje
-@license MIT
-
-*/
-
 interface erc20 {
     function totalSupply() external view returns (uint256);
     function transfer(address recipient, uint amount) external returns (bool);
@@ -60,9 +52,13 @@ contract ve_dist {
         uint max_epoch
     );
 
+    event SetDepositor(
+        address indexed depositor
+    );
+
     uint constant WEEK = 7 * 86400;
 
-    uint public start_time;
+    uint public immutable start_time;
     uint public time_cursor;
     mapping(uint => uint) public time_cursor_of;
     mapping(uint => uint) public user_epoch_of;
@@ -70,8 +66,8 @@ contract ve_dist {
     uint public last_token_time;
     uint[1000000000000000] public tokens_per_week;
 
-    address public voting_escrow;
-    address public token;
+    address public immutable voting_escrow;
+    address public immutable token;
     uint public token_last_balance;
 
     uint[1000000000000000] public ve_supply;
@@ -349,7 +345,8 @@ contract ve_dist {
 
     // Once off event on contract initialize
     function setDepositor(address _depositor) external {
-        require(msg.sender == depositor);
+        require(msg.sender == depositor, '!depositor');
         depositor = _depositor;
+        emit SetDepositor(depositor);
     }
 }

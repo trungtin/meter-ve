@@ -253,10 +253,10 @@ interface IERC721Receiver {
     * @dev Whenever an {IERC721} `tokenId` token is transferred to this contract via {IERC721-safeTransferFrom}
     * by `operator` from `from`, this function is called.
     *
-    * It must return its Solidity selector to confirm the token transfer.
+    * It must return its MTR selector to confirm the token transfer.
     * If any other value is returned or the interface is not implemented by the recipient, the transfer will be reverted.
     *
-    * The selector can be obtained in Solidity with `IERC721.onERC721Received.selector`.
+    * The selector can be obtained in MTR with `IERC721.onERC721Received.selector`.
     */
     function onERC721Received(
         address operator,
@@ -350,6 +350,11 @@ contract ve is IERC721, IERC721Metadata {
     );
     event Withdraw(address indexed provider, uint tokenId, uint value, uint ts);
     event Supply(uint prevSupply, uint supply);
+    event SetVoter(address indexed voter);
+    event Voting(uint tokenId);
+    event Abstain(uint tokenId);
+    event Attach(uint tokenId);
+    event Detach(uint tokenId);
 
     uint internal constant WEEK = 1 weeks;
     uint internal constant MAXTIME = 4 * 365 * 86400;
@@ -416,7 +421,7 @@ contract ve is IERC721, IERC721Metadata {
     uint8 internal constant _entered = 2;
     uint8 internal _entered_state = 1;
     modifier nonreentrant() {
-        require(_entered_state == _not_entered);
+        require(_entered_state == _not_entered, 'lock');
         _entered_state = _entered;
         _;
         _entered_state = _not_entered;
@@ -616,7 +621,7 @@ contract ve is IERC721, IERC721Metadata {
     ) internal {
         require(attachments[_tokenId] == 0 && !voted[_tokenId], "attached");
         // Check requirements
-        require(_isApprovedOrOwner(_sender, _tokenId));
+        require(_isApprovedOrOwner(_sender, _tokenId), 'not approve or owner');
         // Clear approval. Throws if `_from` is not the current owner
         _clearApproval(_from, _tokenId);
         // Remove NFT. Throws if `_tokenId` is not a valid NFT
@@ -722,13 +727,13 @@ contract ve is IERC721, IERC721Metadata {
     function approve(address _approved, uint _tokenId) public {
         address owner = idToOwner[_tokenId];
         // Throws if `_tokenId` is not a valid NFT
-        require(owner != address(0));
+        require(owner != address(0), 'owner is zero');
         // Throws if `_approved` is the current owner
-        require(_approved != owner);
+        require(_approved != owner, '!_approved');
         // Check requirements
         bool senderIsOwner = (idToOwner[_tokenId] == msg.sender);
         bool senderIsApprovedForAll = (ownerToOperators[owner])[msg.sender];
-        require(senderIsOwner || senderIsApprovedForAll);
+        require(senderIsOwner || senderIsApprovedForAll, 'no approved');
         // Set the approval
         idToApprovals[_tokenId] = _approved;
         emit Approval(owner, _approved, _tokenId);
@@ -877,22 +882,9 @@ contract ve is IERC721, IERC721Metadata {
             // Schedule the slope changes (slope is going down)
             // We subtract new_user_slope from [new_locked.end]
             // and add old_user_slope to [old_locked.end]
-            if (old_locked.end > block.timestamp) {
-                // old_dslope was <something> - u_old.slope, so we cancel that
-                old_dslope += u_old.slope;
-                if (new_locked.end == old_locked.end) {
-                    old_dslope -= u_new.slope; // It was a new deposit, not extension
-                }
-                slope_changes[old_locked.end] = old_dslope;
-            }
+            if(old_locked.end > block.timestamp) slope_changes[old_locked.end] += u_old.slope;
+            if(new_locked.end > block.timestamp) slope_changes[new_locked.end] -= u_new.slope;
 
-            if (new_locked.end > block.timestamp) {
-                if (new_locked.end > old_locked.end) {
-                    new_dslope -= u_new.slope; // old slope disappeared at this point
-                    slope_changes[new_locked.end] = new_dslope;
-                }
-                // else: we recorded it already in old_dslope
-            }
             // Now handle user history
             uint user_epoch = user_point_epoch[_tokenId] + 1;
 
@@ -945,35 +937,40 @@ contract ve is IERC721, IERC721Metadata {
     }
 
     function setVoter(address _voter) external {
-        require(msg.sender == voter);
+        require(msg.sender == voter, '!voter');
         voter = _voter;
+        emit SetVoter(voter);
     }
 
     function voting(uint _tokenId) external {
-        require(msg.sender == voter);
+        require(msg.sender == voter, '!voter');
         voted[_tokenId] = true;
+        emit Voting(_tokenId);
     }
 
     function abstain(uint _tokenId) external {
-        require(msg.sender == voter);
+        require(msg.sender == voter, '!voter');
         voted[_tokenId] = false;
+        emit Abstain(_tokenId);
     }
 
     function attach(uint _tokenId) external {
-        require(msg.sender == voter);
+        require(msg.sender == voter, '!voter');
         attachments[_tokenId] = attachments[_tokenId]+1;
+        emit Attach(_tokenId);
     }
 
     function detach(uint _tokenId) external {
-        require(msg.sender == voter);
+        require(msg.sender == voter, '!voter');
         attachments[_tokenId] = attachments[_tokenId]-1;
+        emit Detach(_tokenId);
     }
 
     function merge(uint _from, uint _to) external {
         require(attachments[_from] == 0 && !voted[_from], "attached");
-        require(_from != _to);
-        require(_isApprovedOrOwner(msg.sender, _from));
-        require(_isApprovedOrOwner(msg.sender, _to));
+        require(_from != _to, 'It cant be the same');
+        require(_isApprovedOrOwner(msg.sender, _from), 'not approve or owner');
+        require(_isApprovedOrOwner(msg.sender, _to), 'not approve or owner');
 
         LockedBalance memory _locked0 = locked[_from];
         LockedBalance memory _locked1 = locked[_to];
@@ -1003,7 +1000,7 @@ contract ve is IERC721, IERC721Metadata {
     function deposit_for(uint _tokenId, uint _value) external nonreentrant {
         LockedBalance memory _locked = locked[_tokenId];
 
-        require(_value > 0); // dev: need non-zero value
+        require(_value > 0, 'value is zero'); // dev: need non-zero value
         require(_locked.amount > 0, 'No existing lock found');
         require(_locked.end > block.timestamp, 'Cannot add to expired lock. Withdraw');
         _deposit_for(_tokenId, _value, 0, _locked, DepositType.DEPOSIT_FOR_TYPE);
@@ -1016,7 +1013,7 @@ contract ve is IERC721, IERC721Metadata {
     function _create_lock(uint _value, uint _lock_duration, address _to) internal returns (uint) {
         uint unlock_time = (block.timestamp + _lock_duration) / WEEK * WEEK; // Locktime is rounded down to weeks
 
-        require(_value > 0); // dev: need non-zero value
+        require(_value > 0, 'value is zero'); // dev: need non-zero value
         require(unlock_time > block.timestamp, 'Can only lock until time in the future');
         require(unlock_time <= block.timestamp + MAXTIME, 'Voting lock can be 4 years max');
 
@@ -1301,7 +1298,7 @@ contract ve is IERC721, IERC721Metadata {
         output = string(abi.encodePacked(output, "locked_end ", toString(_locked_end), '</text><text x="10" y="80" class="base">'));
         output = string(abi.encodePacked(output, "value ", toString(_value), '</text></svg>'));
 
-        string memory json = Base64.encode(bytes(string(abi.encodePacked('{"name": "lock #', toString(_tokenId), '", "description": "Solidly locks, can be used to boost gauge yields, vote on token emission, and receive bribes", "image": "data:image/svg+xml;base64,', Base64.encode(bytes(output)), '"}'))));
+        string memory json = Base64.encode(bytes(string(abi.encodePacked('{"name": "lock #', toString(_tokenId), '", "description": "mtr locks, can be used to boost gauge yields, vote on token emission, and receive bribes", "image": "data:image/svg+xml;base64,', Base64.encode(bytes(output)), '"}'))));
         output = string(abi.encodePacked('data:application/json;base64,', json));
     }
 

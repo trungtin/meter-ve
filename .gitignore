@@ -8,3 +8,6 @@ typechain
 cache
 artifacts
 hardhat.config.js
+
+output
+test/fixtures/accounts.js

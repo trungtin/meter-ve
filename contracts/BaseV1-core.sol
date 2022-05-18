@@ -47,15 +47,15 @@ contract BaseV1Fees {
     }
 
     function _safeTransfer(address token,address to,uint256 value) internal {
-        require(token.code.length > 0);
+        require(token.code.length > 0, 'token err');
         (bool success, bytes memory data) =
         token.call(abi.encodeWithSelector(erc20.transfer.selector, to, value));
-        require(success && (data.length == 0 || abi.decode(data, (bool))));
+        require(success && (data.length == 0 || abi.decode(data, (bool))), 'TransferHelper: TRANSFER_FAILED');
     }
 
     // Allow the pair to transfer fees to users
     function claimFeesFor(address recipient, uint amount0, uint amount1) external {
-        require(msg.sender == pair);
+        require(msg.sender == pair, '!pair');
         if (amount0 > 0) _safeTransfer(token0, recipient, amount0);
         if (amount1 > 0) _safeTransfer(token1, recipient, amount1);
     }
@@ -163,7 +163,7 @@ contract BaseV1Pair {
     // simple re-entrancy check
     uint internal _unlocked = 1;
     modifier lock() {
-        require(_unlocked == 1);
+        require(_unlocked == 1, 'lock');
         _unlocked = 2;
         _;
         _unlocked = 1;
@@ -387,7 +387,7 @@ contract BaseV1Pair {
 
     // this low-level function should be called from a contract which performs important safety checks
     function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data) external lock {
-        require(!BaseV1Factory(factory).isPaused());
+        require(!BaseV1Factory(factory).isPaused(), 'paused');
         require(amount0Out > 0 || amount1Out > 0, 'IOA'); // BaseV1: INSUFFICIENT_OUTPUT_AMOUNT
         (uint _reserve0, uint _reserve1) =  (reserve0, reserve1);
         require(amount0Out < _reserve0 && amount1Out < _reserve1, 'IL'); // BaseV1: INSUFFICIENT_LIQUIDITY
@@ -466,7 +466,11 @@ contract BaseV1Pair {
 
     function getAmountOut(uint amountIn, address tokenIn) external view returns (uint) {
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        amountIn -= amountIn / 10000; // remove fee from amount received
+        if (stable){
+            amountIn -= amountIn / 10000; // remove fee from amount received
+        }else{
+            amountIn -= amountIn * 25 / 10000; // remove fee from amount received
+        }
         return _getAmountOut(amountIn, tokenIn, _reserve0, _reserve1);
     }
 
@@ -574,10 +578,10 @@ contract BaseV1Pair {
     }
 
     function _safeTransfer(address token,address to,uint256 value) internal {
-        require(token.code.length > 0);
+        require(token.code.length > 0, 'token err');
         (bool success, bytes memory data) =
         token.call(abi.encodeWithSelector(erc20.transfer.selector, to, value));
-        require(success && (data.length == 0 || abi.decode(data, (bool))));
+        require(success && (data.length == 0 || abi.decode(data, (bool))), 'TransferHelper: TRANSFER_FAILED');
     }
 }
 
@@ -596,6 +600,8 @@ contract BaseV1Factory {
     bool internal _temp;
 
     event PairCreated(address indexed token0, address indexed token1, bool stable, address pair, uint);
+    event SetPauser(address indexed pendingPauser);
+    event AcceptPauser(address indexed pauser);
 
     constructor() {
         pauser = msg.sender;
@@ -607,17 +613,19 @@ contract BaseV1Factory {
     }
 
     function setPauser(address _pauser) external {
-        require(msg.sender == pauser);
+        require(msg.sender == pauser, '!pauser');
         pendingPauser = _pauser;
+        emit SetPauser(pendingPauser);
     }
 
     function acceptPauser() external {
-        require(msg.sender == pendingPauser);
+        require(msg.sender == pendingPauser, '!pendingPauser');
         pauser = pendingPauser;
+        emit AcceptPauser(pauser);
     }
 
     function setPause(bool _state) external {
-        require(msg.sender == pauser);
+        require(msg.sender == pauser, '!pauser');
         isPaused = _state;
     }
 

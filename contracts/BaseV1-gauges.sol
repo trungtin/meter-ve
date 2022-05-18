@@ -23,7 +23,7 @@ interface ve {
     function balanceOfNFT(uint) external view returns (uint);
     function isApprovedOrOwner(address, uint) external view returns (bool);
     function ownerOf(uint) external view returns (address);
-    function transferFrom(address, address, uint) external;
+    function transferFrom(address, address, uint) external returns (bool);
 }
 
 interface IBaseV1Factory {
@@ -129,7 +129,7 @@ contract Gauge {
     // simple re-entrancy check
     uint internal _unlocked = 1;
     modifier lock() {
-        require(_unlocked == 1);
+        require(_unlocked == 1, 'lock');
         _unlocked = 2;
         _;
         _unlocked = 1;
@@ -312,7 +312,7 @@ contract Gauge {
     }
 
     function getReward(address account, address[] memory tokens) external lock {
-        require(msg.sender == account || msg.sender == voter);
+        require(msg.sender == account || msg.sender == voter, 'wrong account');
         _unlocked = 1;
         Voter(voter).distribute(address(this));
         _unlocked = 2;
@@ -338,6 +338,19 @@ contract Gauge {
         _writeSupplyCheckpoint();
     }
 
+    function withdrawReward(address account, address token) internal {
+        _unlocked = 1;
+        Voter(voter).distribute(address(this));
+        _unlocked = 2;
+
+        (rewardPerTokenStored[token], lastUpdateTime[token]) = _updateRewardPerToken(token);
+        uint _reward = earned(token, account);
+        lastEarn[token][account] = block.timestamp;
+        userRewardPerTokenStored[token][account] = rewardPerTokenStored[token];
+        if (_reward > 0) _safeTransfer(token, account, _reward);
+
+        emit ClaimRewards(msg.sender, token, _reward);
+    }
 
     function rewardPerToken(address token) public view returns (uint) {
         if (derivedSupply == 0) {
@@ -368,7 +381,7 @@ contract Gauge {
         uint reward = rewardPerTokenStored[token];
 
         if (supplyNumCheckpoints == 0) {
-            return (reward, _startTimestamp);
+            return (reward, block.timestamp);
         }
 
         if (rewardRate[token] == 0) {
@@ -402,7 +415,7 @@ contract Gauge {
         uint reward = rewardPerTokenStored[token];
 
         if (supplyNumCheckpoints == 0) {
-            return (reward, _startTimestamp);
+            return (reward, block.timestamp);
         }
 
         if (rewardRate[token] == 0) {
@@ -413,7 +426,7 @@ contract Gauge {
         uint _endIndex = supplyNumCheckpoints-1;
 
         if (_endIndex - _startIndex > 1) {
-            for (uint i = _startIndex; i < _endIndex-1; i++) {
+            for (uint i = _startIndex; i < _endIndex; i++) {
                 SupplyCheckpoint memory sp0 = supplyCheckpoints[i];
                 if (sp0.supply > 0) {
                     SupplyCheckpoint memory sp1 = supplyCheckpoints[i+1];
@@ -449,7 +462,7 @@ contract Gauge {
         uint reward = 0;
 
         if (_endIndex - _startIndex > 1) {
-            for (uint i = _startIndex; i < _endIndex-1; i++) {
+            for (uint i = _startIndex; i < _endIndex; i++) {
                 Checkpoint memory cp0 = checkpoints[account][i];
                 Checkpoint memory cp1 = checkpoints[account][i+1];
                 (uint _rewardPerTokenStored0,) = getPriorRewardPerToken(token, cp0.timestamp);
@@ -470,19 +483,19 @@ contract Gauge {
     }
 
     function deposit(uint amount, uint tokenId) public lock {
-        require(amount > 0);
+        require(amount > 0, 'amount is zero');
 
         _safeTransferFrom(stake, msg.sender, address(this), amount);
         totalSupply += amount;
         balanceOf[msg.sender] += amount;
 
         if (tokenId > 0) {
-            require(ve(_ve).ownerOf(tokenId) == msg.sender);
+            require(ve(_ve).ownerOf(tokenId) == msg.sender, '!owner');
             if (tokenIds[msg.sender] == 0) {
                 tokenIds[msg.sender] = tokenId;
                 Voter(voter).attachTokenToGauge(tokenId, msg.sender);
             }
-            require(tokenIds[msg.sender] == tokenId);
+            require(tokenIds[msg.sender] == tokenId, 'Incorrect token ID');
         } else {
             tokenId = tokenIds[msg.sender];
         }
@@ -513,12 +526,18 @@ contract Gauge {
     }
 
     function withdrawToken(uint amount, uint tokenId) public lock {
+
+        address rewardToken = ve(_ve).token();
+        if (isReward[rewardToken]){
+            withdrawReward(msg.sender, rewardToken);
+        }
+
         totalSupply -= amount;
         balanceOf[msg.sender] -= amount;
         _safeTransfer(stake, msg.sender, amount);
 
         if (tokenId > 0) {
-            require(tokenId == tokenIds[msg.sender]);
+            require(tokenId == tokenIds[msg.sender], 'Incorrect token ID');
             tokenIds[msg.sender] = 0;
             Voter(voter).detachTokenFromGauge(tokenId, msg.sender);
         } else {
@@ -545,8 +564,8 @@ contract Gauge {
     }
 
     function notifyRewardAmount(address token, uint amount) external lock {
-        require(token != stake);
-        require(amount > 0);
+        require(token != stake, 'token == stake');
+        require(amount > 0, 'amount is zero');
         if (rewardRate[token] == 0) _writeRewardPerTokenCheckpoint(token, 0, block.timestamp);
         (rewardPerTokenStored[token], lastUpdateTime[token]) = _updateRewardPerToken(token);
         _claimFees();
@@ -557,11 +576,11 @@ contract Gauge {
         } else {
             uint _remaining = periodFinish[token] - block.timestamp;
             uint _left = _remaining * rewardRate[token];
-            require(amount > _left);
+            require(amount > _left, 'The amount of reward is too small and should be greater than the amount not yet produced');
             _safeTransferFrom(token, msg.sender, address(this), amount);
             rewardRate[token] = (amount + _left) / DURATION;
         }
-        require(rewardRate[token] > 0);
+        require(rewardRate[token] > 0, 'rewardRate is zero');
         uint balance = erc20(token).balanceOf(address(this));
         require(rewardRate[token] <= balance / DURATION, "Provided reward too high");
         periodFinish[token] = block.timestamp + DURATION;
@@ -574,24 +593,24 @@ contract Gauge {
     }
 
     function _safeTransfer(address token, address to, uint256 value) internal {
-        require(token.code.length > 0);
+        require(token.code.length > 0, 'token err');
         (bool success, bytes memory data) =
         token.call(abi.encodeWithSelector(erc20.transfer.selector, to, value));
-        require(success && (data.length == 0 || abi.decode(data, (bool))));
+        require(success && (data.length == 0 || abi.decode(data, (bool))), 'TransferHelper: TRANSFER_FAILED');
     }
 
     function _safeTransferFrom(address token, address from, address to, uint256 value) internal {
-        require(token.code.length > 0);
+        require(token.code.length > 0, 'token err');
         (bool success, bytes memory data) =
         token.call(abi.encodeWithSelector(erc20.transferFrom.selector, from, to, value));
-        require(success && (data.length == 0 || abi.decode(data, (bool))));
+        require(success && (data.length == 0 || abi.decode(data, (bool))), 'TransferHelper: TRANSFER_FROM_FAILED');
     }
 
     function _safeApprove(address token, address spender, uint256 value) internal {
-        require(token.code.length > 0);
+        require(token.code.length > 0, 'token err');
         (bool success, bytes memory data) =
         token.call(abi.encodeWithSelector(erc20.approve.selector, spender, value));
-        require(success && (data.length == 0 || abi.decode(data, (bool))));
+        require(success && (data.length == 0 || abi.decode(data, (bool))), 'TransferHelper: APPROVE_FAILED');
     }
 }
 

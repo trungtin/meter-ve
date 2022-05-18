@@ -2,9 +2,8 @@
 pragma solidity 0.8.11;
 
 contract BaseV1 {
-
-    string public constant symbol = "SOLID";
-    string public constant name = "Solidly";
+    string public constant symbol = "MTR";
+    string public constant name = "MTR";
     uint8 public constant decimals = 18;
     uint public totalSupply = 0;
 
@@ -15,16 +14,19 @@ contract BaseV1 {
 
     event Transfer(address indexed from, address indexed to, uint value);
     event Approval(address indexed owner, address indexed spender, uint value);
+    event SetMinter(address indexed minter);
+    event Mint(address indexed account, uint value);
 
     constructor() {
         minter = msg.sender;
-        _mint(msg.sender, 0);
+        _mint(msg.sender, 700000e18);
     }
 
     // No checks as its meant to be once off to set minting rights to BaseV1 Minter
     function setMinter(address _minter) external {
-        require(msg.sender == minter);
+        require(msg.sender == minter, '!minter');
         minter = _minter;
+        emit SetMinter(minter);
     }
 
     function approve(address _spender, uint _value) external returns (bool) {
@@ -60,8 +62,9 @@ contract BaseV1 {
     }
 
     function mint(address account, uint amount) external returns (bool) {
-        require(msg.sender == minter);
+        require(msg.sender == minter, '!minter');
         _mint(account, amount);
+        emit Mint(account, amount);
         return true;
     }
 }

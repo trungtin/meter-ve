@@ -4,9 +4,16 @@
     "@float-capital/solidity-coverage": "^0.7.17",
     "@nomiclabs/hardhat-ethers": "^2.0.3",
     "@nomiclabs/hardhat-waffle": "^2.0.1",
+    "@openzeppelin/contracts": "^4.6.0",
     "chai": "^4.3.4",
     "ethereum-waffle": "^3.4.0",
     "ethers": "^5.5.2",
-    "hardhat": "^2.8.3"
+    "hardhat": "2.9.4"
+  },
+  "dependencies": {
+    "patch-package": "^6.4.7"
+  },
+  "scripts": {
+    "postinstall": "patch-package"
   }
 }

@@ -11,7 +11,7 @@ interface ve {
     function token() external view returns (address);
     function totalSupply() external view returns (uint);
     function create_lock_for(uint, uint, address) external returns (uint);
-    function transferFrom(address, address, uint) external;
+    function transferFrom(address, address, uint) external returns (bool);
 }
 
 interface underlying {
@@ -44,13 +44,14 @@ contract BaseV1Minter {
     voter public immutable _voter;
     ve public immutable _ve;
     ve_dist public immutable _ve_dist;
-    uint public weekly = 20000000e18;
+    uint public weekly = 2900000e18;
     uint public active_period;
     uint internal constant lock = 86400 * 7 * 52 * 4;
 
     address internal initializer;
 
     event Mint(address indexed sender, uint weekly, uint circulating_supply, uint circulating_emission);
+    event Initialize(address indexed initializer, uint active_period);
 
     constructor(
         address __voter, // the voting & distribution system
@@ -70,14 +71,17 @@ contract BaseV1Minter {
         uint[] memory amounts,
         uint max // sum amounts / max = % ownership of top protocols, so if initial 20m is distributed, and target is 25% protocol ownership, then max - 4 x 20m = 80m
     ) external {
-        require(initializer == msg.sender);
+        require(initializer == msg.sender, '!initializer');
         _token.mint(address(this), max);
         _token.approve(address(_ve), type(uint).max);
         for (uint i = 0; i < claimants.length; i++) {
             _ve.create_lock_for(amounts[i], lock, claimants[i]);
         }
         initializer = address(0);
-        active_period = (block.timestamp + week) / week * week;
+//        active_period = (block.timestamp + week) / week * week;
+        active_period = 1648684800;  // 2022.3.31
+
+        emit Initialize(initializer, active_period);
     }
 
     // calculate circulating supply as total token supply - locked supply
@@ -85,7 +89,7 @@ contract BaseV1Minter {
         return _token.totalSupply() - _ve.totalSupply();
     }
 
-    // emission calculation is 2% of available supply to mint adjusted by circulating / total supply
+    // circulating_supply multiplied by weekly issuance of 98%
     function calculate_emission() public view returns (uint) {
         return weekly * emission * circulating_supply() / target_base / _token.totalSupply();
     }
@@ -111,23 +115,27 @@ contract BaseV1Minter {
         if (block.timestamp >= _period + week && initializer == address(0)) { // only trigger if new week
             _period = block.timestamp / week * week;
             active_period = _period;
-            weekly = weekly_emission();
+            uint256 weeklyEmission = weekly_emission();
 
-            uint _growth = calculate_growth(weekly);
-            uint _required = _growth + weekly;
+            uint _growth = calculate_growth(weeklyEmission);
+            uint _required = _growth + weeklyEmission;
             uint _balanceOf = _token.balanceOf(address(this));
             if (_balanceOf < _required) {
                 _token.mint(address(this), _required-_balanceOf);
             }
 
-            require(_token.transfer(address(_ve_dist), _growth));
+            require(_token.transfer(address(_ve_dist), _growth), '!transfer');
             _ve_dist.checkpoint_token(); // checkpoint token balance that was just minted in ve_dist
             _ve_dist.checkpoint_total_supply(); // checkpoint supply
 
-            _token.approve(address(_voter), weekly);
-            _voter.notifyRewardAmount(weekly);
+            _token.approve(address(_voter), weeklyEmission);
+            _voter.notifyRewardAmount(weeklyEmission);
 
-            emit Mint(msg.sender, weekly, circulating_supply(), circulating_emission());
+            emit Mint(msg.sender, weeklyEmission, circulating_supply(), circulating_emission());
+            
+            if(calculate_emission() > circulating_emission()){ // Inflation is falling by 2 per cent at a time
+                weekly = weekly * emission / target_base;
+            }
         }
         return _period;
     }
