@@ -7,6 +7,20 @@ async function main() {
 
   token = await ethers.getContractFactory("Token");
 
+  usdc = await token.deploy("USDC", "USDC");
+  await usdc.mint(
+    a0.address,
+    ethers.BigNumber.from("1000000000000000000000000000000")
+  );
+  await usdc.mint(
+    a1.address,
+    ethers.BigNumber.from("1000000000000000000000000000000")
+  );
+  await usdc.mint(
+    a2.address,
+    ethers.BigNumber.from("1000000000000000000000000000000")
+  );
+
   usdt = await token.deploy("USDT", "USDT");
   await usdt.mint(
     a0.address,
@@ -53,10 +67,17 @@ async function main() {
   await mim.deployed();
   await dai.deployed();
 
-  const data = {
+  let data = {};
+  try {
+    data = JSON.parse(fs.readFileSync("output/test_tokens.json", "utf8"));
+  } catch (e) {}
+
+  data = {
+    ...data,
     usdt: usdt.address,
     mim: mim.address,
     dai: dai.address,
+    usdc: usdc.address
   };
   if (!fs.existsSync("output")) {
     fs.mkdirSync("output");

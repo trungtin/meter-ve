@@ -4,8 +4,8 @@ async function main() {
   const Token = await ethers.getContractFactory("BaseV1");
   const Gauges = await ethers.getContractFactory("BaseV1GaugeFactory");
   const Bribes = await ethers.getContractFactory("BaseV1BribeFactory");
-  const Core = await ethers.getContractFactory("BaseV1Factory");
-  const Factory = await ethers.getContractFactory("BaseV1Router01");
+  const Factory = await ethers.getContractFactory("BaseV1Factory");
+  const Router = await ethers.getContractFactory("BaseV1Router01");
   const Ve = await ethers.getContractFactory("contracts/ve.sol:ve");
   const Ve_dist = await ethers.getContractFactory(
     "contracts/ve_dist.sol:ve_dist"
@@ -17,16 +17,16 @@ async function main() {
   const token = await Token.deploy();
   const gauges = await Gauges.deploy();
   const bribes = await Bribes.deploy();
-  const core = await Core.deploy();
-  const factory = await Factory.deploy(
-    core.address,
+  const factory = await Factory.deploy();
+  const router = await Router.deploy(
+    factory.address,
     "0x4cb6cef87d8cadf966b455e8bd58fff32aba49d1" // MTR address on testnet
   );
   const ve = await Ve.deploy(token.address);
   const ve_dist = await Ve_dist.deploy(ve.address);
   const voter = await BaseV1Voter.deploy(
     ve.address,
-    core.address,
+    factory.address,
     gauges.address,
     bribes.address
   );
@@ -35,7 +35,7 @@ async function main() {
     ve.address,
     ve_dist.address
   );
-  const library = await Library.deploy(factory.address);
+  const library = await Library.deploy(router.address);
 
   await token.setMinter(minter.address);
   await ve.setVoter(voter.address);
@@ -76,8 +76,8 @@ async function main() {
     token: token.address,
     gauges: gauges.address,
     bribes: bribes.address,
-    core: core.address,
     factory: factory.address,
+    router: router.address,
     ve: ve.address,
     ve_dist: ve_dist.address,
     voter: voter.address,
